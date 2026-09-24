@@ -102,31 +102,10 @@ export default function StudentDashboard({ currentUser }: StudentDashboardProps)
     setIsExplainModalOpen(true);
     setIsExplanationLoading(true);
     setExplanationResult('');
-    
-    try {
-      const response = await fetch('/api/gemini/explain-book', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          authors,
-          description,
-          studentYear: student?.year || currentUser.year || 2024,
-          studentBranch: student?.branch || currentUser.branch || 'Computer Science'
-        })
-      });
-      const data = await response.json();
-      if (data.explanation) {
-        setExplanationResult(data.explanation);
-      } else {
-        setExplanationResult('Could not load AI explanation at this time.');
-      }
-    } catch (err) {
-      console.error(err);
-      setExplanationResult('Could not connect to the academic AI engine right now.');
-    } finally {
-      setIsExplanationLoading(false);
-    }
+
+    const branch = student?.branch || currentUser.branch || 'Computer Science';
+    setExplanationResult(`### 1. CURRICULUM SYLLABUS RELEVANCE\n${title} is a useful reference for ${branch} coursework. Compare its chapters with your current syllabus, lecture notes, and previous examination papers.\n\n### 2. 5-WEEK ACCELERATED STUDY ROADMAP\n* **Week 1**: Review the fundamentals and terminology.\n* **Week 2**: Work through the core examples and diagrams.\n* **Week 3**: Solve chapter exercises without referring to the text.\n* **Week 4**: Connect the topics to laboratory work and past papers.\n* **Week 5**: Revise summaries and complete a timed practice paper.\n\n### 3. EXAM CRITICAL CHEAT SHEET TAKEAWAYS\n* Keep a one-page summary of definitions, formulas, and algorithms.\n* Practice explaining each major concept in your own words.\n* Prioritize topics that appear repeatedly in your course assessments.`);
+    setIsExplanationLoading(false);
   };
 
   const fetchGoogleBooks = async (queryText: string) => {
@@ -159,25 +138,10 @@ export default function StudentDashboard({ currentUser }: StudentDashboardProps)
       return;
     }
     setIsGeneratingDesc(true);
-    try {
-      const response = await fetch('/api/gemini/generate-description', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords: newProdDesc, category: newProdCategory })
-      });
-      const data = await response.json();
-      if (data.description) {
-        setNewProdDesc(data.description);
-        triggerToast('AI Description expanded successfully!', 'success');
-      } else {
-        triggerToast(data.error || 'Failed to expand description.', 'error');
-      }
-    } catch (error) {
-      console.error(error);
-      triggerToast('Error connecting to AI service.', 'error');
-    } finally {
-      setIsGeneratingDesc(false);
-    }
+    const categoryLabel = newProdCategory === 'books' ? 'academic book' : newProdCategory;
+    setNewProdDesc(`${newProdDesc.trim()}. ${categoryLabel} in good condition, suitable for campus study and semester preparation. Please review the photos and details before purchase.`);
+    triggerToast('Description expanded from your keywords.', 'success');
+    setIsGeneratingDesc(false);
   };
 
   const generateAICoverImage = async () => {
@@ -186,25 +150,12 @@ export default function StudentDashboard({ currentUser }: StudentDashboardProps)
       return;
     }
     setIsGeneratingImage(true);
-    try {
-      const response = await fetch('/api/gemini/generate-cover', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: newProdTitle, details: newProdDesc })
-      });
-      const data = await response.json();
-      if (data.imageUrl) {
-        setNewProdImage(data.imageUrl);
-        triggerToast('AI Artwork generated successfully!', 'success');
-      } else {
-        triggerToast(data.error || 'Failed to generate cover.', 'error');
-      }
-    } catch (error) {
-      console.error(error);
-      triggerToast('Error generating AI Cover.', 'error');
-    } finally {
-      setIsGeneratingImage(false);
-    }
+    const fallbackImage = newProdCategory === 'books'
+      ? 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?q=80&w=400'
+      : 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?q=80&w=400';
+    setNewProdImage(fallbackImage);
+    triggerToast('A standard cover image was selected.', 'success');
+    setIsGeneratingImage(false);
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2436,7 +2387,7 @@ export default function StudentDashboard({ currentUser }: StudentDashboardProps)
                         <div className="space-y-1">
                           <p className="text-xs font-extrabold text-white">Synthesizing Course Relevance...</p>
                           <p className="text-[10px] text-slate-500 leading-normal max-w-xs font-sans">
-                            Gemini is evaluating standard Board guidelines to draft your week-by-week study roadmap.
+                            Preparing a five-week study roadmap from the textbook details.
                           </p>
                         </div>
                       </div>
@@ -2654,11 +2605,11 @@ export default function StudentDashboard({ currentUser }: StudentDashboardProps)
                           className="text-[9px] text-indigo-400 hover:text-indigo-300 font-extrabold flex items-center space-x-1 uppercase cursor-pointer disabled:opacity-40"
                         >
                           {isGeneratingDesc ? (
-                            <span className="scale-95 animate-pulse">Expanding via Gemini...</span>
+                            <span className="scale-95 animate-pulse">Expanding from keywords...</span>
                           ) : (
                             <>
                               <Sparkles className="h-3 w-3 text-purple-400 animate-bounce" />
-                              <span>✨ AI Auto-Flesh from Keywords</span>
+                              <span>✨ Expand from Keywords</span>
                             </>
                           )}
                         </button>

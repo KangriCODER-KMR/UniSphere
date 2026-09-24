@@ -2515,7 +2515,7 @@ TCH403,Er. Alok Ranjan,Mechanical Engineering,Ph.D,12 Years,Fluid Dynamics;Therm
                     </div>
                   </div>
                   <div className="text-[10px] text-slate-550 leading-normal border-t border-slate-950/70 pt-2 font-mono">
-                     Security Lock: For secure web hosting, add these values into your Google AI Studio Secrets variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SENDER).
+                     Security Lock: For secure web hosting, add these values to your platform environment variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SENDER).
                   </div>
                 </div>
 
