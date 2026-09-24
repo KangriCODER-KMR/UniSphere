@@ -1,0 +1,299 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Base user credentials and role configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique email address or identifier" },
+        "name": { "type": "string", "description": "Full name of the user" },
+        "email": { "type": "string", "description": "User email address" },
+        "role": { "type": "string", "enum": ["student", "teacher", "admin"], "description": "User role" },
+        "department": { "type": "string", "description": "Associated department code" },
+        "branch": { "type": "string", "description": "Engineering branch" },
+        "year": { "type": "integer", "description": "Academic year of admission" },
+        "section": { "type": "string", "description": "Assigned class section name" }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "Department": {
+      "title": "Academic Department",
+      "description": "College departments managing engineering tracks.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Department Code e.g. CS, IT" },
+        "name": { "type": "string", "description": "Comprehensive department name" },
+        "code": { "type": "string", "description": "Uppercase Department initials" },
+        "head": { "type": "string", "description": "Head of Department (HOD)" },
+        "budget": { "type": "number", "description": "Allocated research/ops budget in INR" },
+        "description": { "type": "string", "description": "Academic goals and focus" },
+        "roomNumber": { "type": "string", "description": "Main office location on campus" }
+      },
+      "required": ["id", "name", "code", "head"]
+    },
+    "Student": {
+      "title": "Student Record",
+      "description": "Complete student demographics and academic profiles.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique Roll number e.g. CS2024001" },
+        "name": { "type": "string", "description": "Full name" },
+        "branch": { "type": "string", "description": "Academic Branch" },
+        "year": { "type": "integer", "description": "Curriculum Year" },
+        "section": { "type": "string", "description": "Section identity" },
+        "parentName": { "type": "string", "description": "Father or Mother name" },
+        "parentContact": { "type": "string", "description": "Parent phone number" },
+        "parentEmail": { "type": "string", "description": "Parent email" },
+        "address": { "type": "string", "description": "Residential address" },
+        "currentAttendance": { "type": "number", "description": "Verified attendance percentage" },
+        "status": { "type": "string", "enum": ["Enrolled", "Suspended", "Graduated", "Inactive"] },
+        "email": { "type": "string", "description": "Official college email address" },
+        "gpa": { "type": "number", "description": "Current GPA scale 10.0" }
+      },
+      "required": ["id", "name", "branch", "year", "parentName", "parentContact", "address"]
+    },
+    "Course": {
+      "title": "Course Subject",
+      "description": "Offered curriculum items catalog.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unified Course code e.g. CS101" },
+        "name": { "type": "string", "description": "Title of the course" },
+        "credits": { "type": "integer", "description": "Academic workload credit weight" },
+        "department": { "type": "string", "description": "Department track managing this course" },
+        "semester": { "type": "string", "description": "Assigned term e.g. Fall 2024" },
+        "maxSeats": { "type": "integer", "description": "Maximum enrollment quota" },
+        "currentEnrolled": { "type": "integer", "description": "Active registered students" },
+        "instructor": { "type": "string", "description": "Teacher heading this module" },
+        "schedule": { "type": "string", "description": "Timeslot overview" },
+        "room": { "type": "string", "description": "Lecture room code" }
+      },
+      "required": ["id", "name", "credits", "department", "maxSeats", "instructor"]
+    },
+    "Complaint": {
+      "title": "Grievance Complaint",
+      "description": "Student-submitted campus issue reports.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique grievance tracker ID" },
+        "studentId": { "type": "string", "description": "Filing Student ID" },
+        "subject": { "type": "string", "description": "Topic or Category of issue" },
+        "message": { "type": "string", "description": "Full description of grievance" },
+        "status": { "type": "string", "enum": ["pending", "resolved", "processing"] },
+        "date": { "type": "string", "description": "ISO timestamp" },
+        "priority": { "type": "string", "enum": ["low", "medium", "high"] }
+      },
+      "required": ["id", "studentId", "subject", "message", "status", "date"]
+    },
+    "HostelAllocation": {
+      "title": "Hostel Allocation Record",
+      "description": "Hostel room allocation and fee ledgers.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Allocation contract code" },
+        "studentId": { "type": "string", "description": "Allocated student ID" },
+        "hostelId": { "type": "string", "description": "Hostel building ID" },
+        "roomNo": { "type": "string", "description": "Assigned room number" },
+        "roomType": { "type": "string", "description": "Room description e.g. Double Occupancy" },
+        "status": { "type": "string", "enum": ["active", "inactive", "pending"] },
+        "monthlyRent": { "type": "number", "description": "Monthly rent fees in INR" },
+        "allocationDate": { "type": "string", "description": "ISO date" }
+      },
+      "required": ["id", "studentId", "hostelId", "roomNo", "status", "monthlyRent"]
+    },
+    "PaymentRecord": {
+      "title": "Payment Settlement Ledger",
+      "description": "Academic fee transaction settlements.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique transaction or invoice ID" },
+        "studentId": { "type": "string", "description": "Payer scholar ID" },
+        "amount": { "type": "number", "description": "Paid amount in INR" },
+        "semester": { "type": "string", "description": "Fees term" },
+        "status": { "type": "string", "enum": ["completed", "pending", "failed"] },
+        "paymentDate": { "type": "string", "description": "ISO timestamp" },
+        "transactionId": { "type": "string", "description": "Payment Gateway Transaction ID" },
+        "purpose": { "type": "string", "description": "E.g. Tuition Fee, Hostel Fee" }
+      },
+      "required": ["id", "studentId", "amount", "semester", "status", "paymentDate"]
+    },
+    "OnlineExam": {
+      "title": "Online Proctored Exam Details",
+      "description": "Authorized examination schedule parameters.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Exams ID" },
+        "courseId": { "type": "string", "description": "Subject Course ID" },
+        "title": { "type": "string", "description": "Exam Title" },
+        "date": { "type": "string", "description": "Date of proctor" },
+        "startTime": { "type": "string", "description": "Exam start time" },
+        "duration": { "type": "integer", "description": "Exam duration in minutes" },
+        "totalMarks": { "type": "integer", "description": "Max score" },
+        "status": { "type": "string", "enum": ["upcoming", "active", "completed"] },
+        "syllabus": { "type": "string", "description": "Syllabus index topics" }
+      },
+      "required": ["id", "courseId", "title", "date", "duration", "totalMarks", "status"]
+    },
+    "ExamResult": {
+      "title": "Exam Student Result",
+      "description": "Grading ledger for proctored exams and assignments.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique result token" },
+        "studentId": { "type": "string", "description": "Student candidate ID" },
+        "examId": { "type": "string", "description": "Proctors Exam ID" },
+        "score": { "type": "number", "description": "Achieved score marks" },
+        "total": { "type": "number", "description": "Total index marks potential" },
+        "remarks": { "type": "string", "description": "Teacher qualitative evaluation" },
+        "date": { "type": "string", "description": "Score submission date" }
+      },
+      "required": ["studentId", "examId", "score", "total", "date"]
+    },
+    "StoreProduct": {
+      "title": "Store Product Item",
+      "description": "Products listed inside the campus marketplace repository.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "sellerType": { "type": "string", "enum": ["admin", "student"] },
+        "sellerId": { "type": "string" },
+        "sellerName": { "type": "string" },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "stock": { "type": "integer" },
+        "condition": { "type": "string", "enum": ["new", "used"] },
+        "rating": { "type": "number" },
+        "reviews": { "type": "integer" }
+      },
+      "required": ["id", "title", "description", "category", "sellerType", "sellerId", "price"]
+    },
+    "StoreProductPrivate": {
+      "title": "Private Store Product Metadata",
+      "description": "Information asymmetry guardrail: sensitive seller profiles and base cost parameters hidden from student buyers.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unified Product ID mismatch reference" },
+        "sellerId": { "type": "string", "description": "Confidential seller identifier" },
+        "sellerName": { "type": "string", "description": "Confidential seller name" },
+        "sellerEmail": { "type": "string", "description": "Confidential seller email" },
+        "sellerPrice": { "type": "number", "description": "Private seller base payout cost of item" },
+        "adminCommission": { "type": "number", "description": "Calculated admin markup commission profit" }
+      },
+      "required": ["id", "sellerId", "sellerPrice"]
+    },
+    "MarketplaceSettings": {
+      "title": "Dynamic Marketplace Commission Commission",
+      "description": "System-wide settlement parameters and commission configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "globalType": { "type": "string", "enum": ["percentage", "flat"] },
+        "globalPercentage": { "type": "number" },
+        "globalFlat": { "type": "number" },
+        "payoutBankName": { "type": "string" },
+        "payoutAccountNo": { "type": "string" },
+        "payoutRoutingCode": { "type": "string" },
+        "payoutAccountHolder": { "type": "string" },
+        "stripeConnected": { "type": "boolean" },
+        "stripeAccountId": { "type": "string" }
+      },
+      "required": ["globalType"]
+    },
+    "MarketplaceOrder": {
+      "title": "Campus Marketplace Order",
+      "description": "A purchase record containing books and other items ordered directly.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "adminCommissionEarned": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["paid", "pending"] },
+        "deliveryStatus": { "type": "string", "enum": ["Processing", "Delivered", "Ready for Pickup"] },
+        "orderDate": { "type": "string" }
+      },
+      "required": ["id", "studentId", "studentName", "totalAmount", "paymentStatus", "deliveryStatus", "orderDate"]
+    },
+    "InstitutionalConfig": {
+      "title": "Institutional Configuration",
+      "description": "Central specifications and profile attributes of the college.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "abbreviation": { "type": "string" },
+        "slug": { "type": "string" },
+        "domain": { "type": "string" },
+        "location": { "type": "string" },
+        "accentColor": { "type": "string" },
+        "logoSubtitle": { "type": "string" },
+        "foundationYear": { "type": "string" },
+        "historyText": { "type": "string" },
+        "currencySymbol": { "type": "string" }
+      },
+      "required": ["id", "name", "abbreviation", "domain", "location"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "College profile information."
+    },
+    "/departments/{deptId}": {
+      "schema": "Department",
+      "description": "Engineering and academic branch entities."
+    },
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Demographic profiles."
+    },
+    "/courses/{courseId}": {
+      "schema": "Course",
+      "description": "Academic syllabus catalogs."
+    },
+    "/complaints/{complaintId}": {
+      "schema": "Complaint",
+      "description": "Filed student complaints."
+    },
+    "/allocations/{allocationId}": {
+      "schema": "HostelAllocation",
+      "description": "Campus residential accommodation mappings."
+    },
+    "/payments/{paymentId}": {
+      "schema": "PaymentRecord",
+      "description": "Tuition and Hostel payment histories."
+    },
+    "/exams/{examId}": {
+      "schema": "OnlineExam",
+      "description": "Online exams timetable roster."
+    },
+    "/results/{resultId}": {
+      "schema": "ExamResult",
+      "description": "Student exam grade records."
+    },
+    "/products/{productId}": {
+      "schema": "StoreProduct",
+      "description": "Marketplace campus listed products."
+    },
+    "/products_private/{productId}": {
+      "schema": "StoreProductPrivate",
+      "description": "Confidential seller metadata hidden from search listings."
+    },
+    "/settings/marketplace": {
+      "schema": "MarketplaceSettings",
+      "description": "Dynamic commission markup ledger."
+    },
+    "/settings/institution": {
+      "schema": "InstitutionalConfig",
+      "description": "Institutional configuration parameters."
+    },
+    "/orders/{orderId}": {
+      "schema": "MarketplaceOrder",
+      "description": "Live campus bookstore marketplace orders."
+    }
+  }
+}

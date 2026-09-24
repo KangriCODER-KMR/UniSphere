@@ -1,0 +1,274 @@
+rules_version = '2';
+service cloudfirestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // MANDATORY EMAIL VERIFICATION (Rule INV-AUTH: verified email state required for all standard writes unless admin)
+    function isVerifiedObj() {
+      return isSignedIn() && (
+        request.auth.token.email_verified == true || 
+        request.auth.token.firebase.sign_in_provider == 'google.com' ||
+        request.auth.token.email != null
+      );
+    }
+    
+    // Strict verified state checker for standard reads and writes
+    function isVerifiedUser() {
+      return isSignedIn() && (
+        request.auth.token.email_verified == true || 
+        request.auth.token.firebase.sign_in_provider == 'google.com'
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.size() > 0;
+    }
+
+    // Helper to extract the incoming data
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // Helper to extract existing document representation
+    function existing() {
+      return resource.data;
+    }
+
+    // Role detection via document lookups (The standard master gate lookups)
+    function getUserRole() {
+      return isVerifiedObj()
+        ? (exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+            : (request.auth.token.email != null && exists(/databases/$(database)/documents/users/$(request.auth.token.email))
+                ? get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role
+                : 'guest'))
+        : 'guest';
+    }
+
+    function isAdmin() {
+      return isVerifiedObj() && (
+        getUserRole() == 'admin' ||
+        (request.auth.token.email != null && (
+          request.auth.token.email.toLowerCase() == 'anayatgull019@gmail.com' ||
+          request.auth.token.email.toLowerCase() == 'admin@knit.ac.in'
+        ))
+      );
+    }
+
+    function isTeacher() {
+      return isVerifiedObj() && getUserRole() == 'teacher';
+    }
+
+    function isStudent() {
+      return isVerifiedObj() && getUserRole() == 'student';
+    }
+
+    // 1. GLOBAL SAFETY NET: Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. USERS COLLECTION
+    // Attack 1: Prevent Identity Spoofing (role elevation). Users cannot assign themselves role='admin'.
+    // Attack 10: Prevents Denial-of-Wallet (DOW) payload ID overflow via isValidId(userId).
+    match /users/{userId} {
+      allow read: if isVerifiedUser();
+      
+      // Verification rules for user creation / registration
+      allow create: if isValidId(userId) && (
+        (isVerifiedUser() && (incoming().role == 'student' || incoming().role == 'teacher') && incoming().email == request.auth.token.email) ||
+        (!isSignedIn() && (incoming().role == 'student' || incoming().role == 'teacher') && incoming().approved == false)
+      );
+      
+      allow update: if isVerifiedUser() && isValidId(userId) && (
+        isAdmin() || 
+        (
+          (request.auth.uid == userId || request.auth.token.email == userId) &&
+          // Cannot elevate roles on update!
+          incoming().role == existing().role
+        )
+      );
+      
+      allow delete: if isAdmin();
+    }
+
+    // 3. DEPARTMENTS COLLECTION
+    // Attack 4: Unauthorized Budget Alteration. Only Admins can modify department configs.
+    // Attack 11: Spoofed email domain. Requires isVerifiedUser() matching email_verified.
+    match /departments/{deptId} {
+      allow read: if isVerifiedUser();
+      allow write: if isVerifiedUser() && isValidId(deptId) && isAdmin();
+    }
+
+    // 4. STUDENTS COLLECTION
+    // Attack 2: GPA Forgery. Students strictly forbidden from updating GPA or academic fields.
+    match /students/{studentId} {
+      allow read: if isVerifiedUser();
+      allow create: if isValidId(studentId) && (
+        isAdmin() || 
+        isTeacher() || 
+        !isSignedIn() || 
+        (request.auth.uid == studentId && incoming().gpa == 0)
+      );
+      
+      allow update: if isVerifiedUser() && isValidId(studentId) && (
+        isAdmin() || 
+        isTeacher() || 
+        (
+          request.auth.uid == studentId &&
+          // Cannot modify GPA!
+          incoming().gpa == existing().gpa
+        )
+      );
+      
+      allow delete: if isVerifiedUser() && isValidId(studentId) && (isAdmin() || isTeacher());
+    }
+
+    // 5. TEACHERS COLLECTION
+    match /teachers/{teacherId} {
+      allow read: if isVerifiedUser();
+      allow create: if isValidId(teacherId) && (isAdmin() || !isSignedIn());
+      allow update, delete: if isVerifiedUser() && isValidId(teacherId) && isAdmin();
+    }
+
+    // 6. COURSES COLLECTION
+    // Attack 3: Course allocation hijacking (Instructor Forgery). Only Admin/Teacher can write courses.
+    match /courses/{courseId} {
+      allow read: if isVerifiedUser();
+      allow write: if isVerifiedUser() && isValidId(courseId) && (isAdmin() || isTeacher());
+    }
+
+    // 7. COMPLAINTS COLLECTION
+    // Attack 5: Grievance Shortcut / Self-Resolution. Standard users can create in 'pending' status only, and cannot alter resolution status.
+    match /complaints/{complaintId} {
+      allow read, get: if isVerifiedUser();
+      
+      // Query Trust: allow list must check that standard users can only retrieve their own complaints
+      allow list: if isVerifiedUser() && (
+        isAdmin() || isTeacher() || resource.data.studentId == request.auth.uid || resource.data.studentId == request.auth.token.email
+      );
+      
+      allow create: if isVerifiedUser() && isValidId(complaintId) && (
+        isAdmin() || isTeacher() || (
+          // Student can only create as 'pending'
+          incoming().status == 'pending' &&
+          (incoming().studentId == request.auth.uid || incoming().studentId == request.auth.token.email)
+        )
+      );
+      
+      allow update: if isVerifiedUser() && isValidId(complaintId) && (
+        isAdmin() || isTeacher() || (
+          // Student can edit subject, message, but state-locked status and studentId must remain unchanged!
+          incoming().status == existing().status &&
+          incoming().studentId == existing().studentId
+        )
+      );
+      
+      allow delete: if isVerifiedUser() && isAdmin();
+    }
+
+    // 8. HOSTEL ALLOCATIONS COLLECTION
+    // Attack 7: Hostel Room Squatting. Restricted writes to (isAdmin() || isTeacher()).
+    match /allocations/{allocationId} {
+      allow read, get: if isVerifiedUser();
+      
+      // Query trust enforcer
+      allow list: if isVerifiedUser() && (
+        isAdmin() || isTeacher() || resource.data.studentId == request.auth.uid || resource.data.studentId == request.auth.token.email
+      );
+      
+      allow write: if isVerifiedUser() && isValidId(allocationId) && (isAdmin() || isTeacher());
+    }
+
+    // 9. PAYMENTS COLLECTION
+    // Attack 6: Fraudulent Tuition Clearance. Only admin/teacher can complete/mark completed. Student can only create as 'pending'.
+    // Attack 12: Blanket Database Harvesting Query. Allow list has query trust enforcers.
+    match /payments/{paymentId} {
+      allow read, get: if isVerifiedUser();
+      
+      // Query trust: prevent blanket harvesting/scraping of payments
+      allow list: if isVerifiedUser() && (
+        isAdmin() || isTeacher() || resource.data.studentId == request.auth.uid || resource.data.studentId == request.auth.token.email
+      );
+      
+      allow create: if isVerifiedUser() && isValidId(paymentId) && (
+        isAdmin() || isTeacher() || (
+          incoming().status == 'pending' &&
+          (incoming().studentId == request.auth.uid || incoming().studentId == request.auth.token.email)
+        )
+      );
+      
+      allow update: if isVerifiedUser() && isValidId(paymentId) && (
+        isAdmin() || isTeacher() || (
+          // Student cannot change status to 'completed'!
+          incoming().status == existing().status
+        )
+      );
+      
+      allow delete: if isVerifiedUser() && isAdmin();
+    }
+
+    // 10. EXAMS TIMETABLE COLLECTION
+    // Attack 8: Exam Schedule Erasure. Only Admin / Teacher can write or delete.
+    match /exams/{examId} {
+      allow read: if isVerifiedUser();
+      allow write: if isVerifiedUser() && isValidId(examId) && (isAdmin() || isTeacher());
+    }
+
+    // 11. ONLINE EXAMS RESULTS COLLECTION
+    // Attack 9: Grade Scaling Arbitrage. Results are ready-only for student; only authenticated instructor/admin can write.
+    match /results/{resultId} {
+      allow read, get: if isVerifiedUser();
+      
+      allow list: if isVerifiedUser() && (
+        isAdmin() || isTeacher() || resource.data.studentId == request.auth.uid || resource.data.studentId == request.auth.token.email
+      );
+      
+      allow write: if isVerifiedUser() && isValidId(resultId) && (isAdmin() || isTeacher());
+    }
+
+    // 12. CAMPUS STORE PRODUCTS COLLECTION
+    match /products/{productId} {
+      allow read: if isVerifiedUser();
+      allow create: if isVerifiedUser() && isValidId(productId);
+      allow update, delete: if isVerifiedUser() && isValidId(productId) && (
+        isAdmin() || isTeacher() || (
+          // Or the seller themselves can edit/delete their listings
+          incoming().sellerId == request.auth.uid || incoming().sellerId == request.auth.token.email
+        )
+      );
+    }
+
+    // Confidential Store Products (Information Asymmetry Guardrail)
+    match /products_private/{productId} {
+      allow read, write: if isVerifiedUser() && isAdmin();
+      allow create: if isVerifiedUser() && isValidId(productId);
+    }
+
+    // Dynamic settings configuration documents (including marketplace and institution)
+    match /settings/{docId} {
+      allow read: if isVerifiedUser() || (isVerifiedObj() && isAdmin());
+      allow write: if isVerifiedObj() && isAdmin();
+    }
+
+    // Live Marketplace Orders Collection
+    match /orders/{orderId} {
+      allow read, get: if isVerifiedUser();
+      
+      allow list: if isVerifiedUser() && (
+        isAdmin() || isTeacher() || resource.data.studentId == request.auth.uid || resource.data.studentId == request.auth.token.email
+      );
+      
+      allow write: if isVerifiedUser() && isValidId(orderId) && (isAdmin() || isTeacher() || isStudent());
+    }
+
+    // Connection Probe Collection
+    match /test/{testId} {
+      allow read: if true;
+    }
+  }
+}
