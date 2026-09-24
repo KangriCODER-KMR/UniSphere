@@ -67,7 +67,9 @@ service cloudfirestore {
     // Attack 1: Prevent Identity Spoofing (role elevation). Users cannot assign themselves role='admin'.
     // Attack 10: Prevents Denial-of-Wallet (DOW) payload ID overflow via isValidId(userId).
     match /users/{userId} {
-      allow read: if isAdmin() || (isVerifiedUser() && request.auth.uid == userId);
+      // Users may read only their own profile while the app completes verification.
+      // All role-protected data remains behind isVerifiedUser()/isAdmin().
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
       
       // Verification rules for user creation / registration
       allow create: if isValidId(userId) && (
