@@ -12,6 +12,7 @@ import {
   Sparkles, Wand2, Upload
 } from 'lucide-react';
 import { dbService, WEEKLY_TIMETABLES } from '../lib/db';
+import { authenticatedFetch } from '../lib/firebase';
 import { Student, Course, StoreProduct, CartItem, UserProfile, MarketplaceOrder } from '../types';
 import PaymentGateway from './PaymentGateway';
 
@@ -102,10 +103,20 @@ export default function StudentDashboard({ currentUser }: StudentDashboardProps)
     setIsExplainModalOpen(true);
     setIsExplanationLoading(true);
     setExplanationResult('');
-
-    const branch = student?.branch || currentUser.branch || 'Computer Science';
-    setExplanationResult(`### 1. CURRICULUM SYLLABUS RELEVANCE\n${title} is a useful reference for ${branch} coursework. Compare its chapters with your current syllabus, lecture notes, and previous examination papers.\n\n### 2. 5-WEEK ACCELERATED STUDY ROADMAP\n* **Week 1**: Review the fundamentals and terminology.\n* **Week 2**: Work through the core examples and diagrams.\n* **Week 3**: Solve chapter exercises without referring to the text.\n* **Week 4**: Connect the topics to laboratory work and past papers.\n* **Week 5**: Revise summaries and complete a timed practice paper.\n\n### 3. EXAM CRITICAL CHEAT SHEET TAKEAWAYS\n* Keep a one-page summary of definitions, formulas, and algorithms.\n* Practice explaining each major concept in your own words.\n* Prioritize topics that appear repeatedly in your course assessments.`);
-    setIsExplanationLoading(false);
+    try {
+        const response = await authenticatedFetch('/api/ai/explain-book', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, authors, description, studentYear: student?.year || currentUser.year || 2024, studentBranch: student?.branch || currentUser.branch || 'Computer Science' })
+      });
+      const data = await response.json();
+      setExplanationResult(data.explanation || data.error || 'The AI study guide could not be generated.');
+    } catch (error) {
+      console.error(error);
+      setExplanationResult('The AI study guide is temporarily unavailable.');
+    } finally {
+      setIsExplanationLoading(false);
+    }
   };
 
   const fetchGoogleBooks = async (queryText: string) => {
@@ -138,10 +149,21 @@ export default function StudentDashboard({ currentUser }: StudentDashboardProps)
       return;
     }
     setIsGeneratingDesc(true);
-    const categoryLabel = newProdCategory === 'books' ? 'academic book' : newProdCategory;
-    setNewProdDesc(`${newProdDesc.trim()}. ${categoryLabel} in good condition, suitable for campus study and semester preparation. Please review the photos and details before purchase.`);
-    triggerToast('Description expanded from your keywords.', 'success');
-    setIsGeneratingDesc(false);
+    try {
+        const response = await authenticatedFetch('/api/ai/generate-description', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords: newProdDesc, category: newProdCategory })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'AI service unavailable.');
+      setNewProdDesc(data.description);
+      triggerToast('AI description expanded successfully.', 'success');
+    } catch (error: any) {
+      triggerToast(error.message || 'AI service unavailable.', 'error');
+    } finally {
+      setIsGeneratingDesc(false);
+    }
   };
 
   const generateAICoverImage = async () => {
@@ -150,12 +172,21 @@ export default function StudentDashboard({ currentUser }: StudentDashboardProps)
       return;
     }
     setIsGeneratingImage(true);
-    const fallbackImage = newProdCategory === 'books'
-      ? 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?q=80&w=400'
-      : 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?q=80&w=400';
-    setNewProdImage(fallbackImage);
-    triggerToast('A standard cover image was selected.', 'success');
-    setIsGeneratingImage(false);
+    try {
+        const response = await authenticatedFetch('/api/ai/generate-cover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newProdTitle, details: newProdDesc })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'AI image service unavailable.');
+      setNewProdImage(data.imageUrl);
+      triggerToast('AI cover generated successfully.', 'success');
+    } catch (error: any) {
+      triggerToast(error.message || 'AI image service unavailable.', 'error');
+    } finally {
+      setIsGeneratingImage(false);
+    }
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2387,7 +2418,7 @@ export default function StudentDashboard({ currentUser }: StudentDashboardProps)
                         <div className="space-y-1">
                           <p className="text-xs font-extrabold text-white">Synthesizing Course Relevance...</p>
                           <p className="text-[10px] text-slate-500 leading-normal max-w-xs font-sans">
-                            Preparing a five-week study roadmap from the textbook details.
+                            Gemini is preparing a five-week study roadmap from the textbook details.
                           </p>
                         </div>
                       </div>
@@ -2605,11 +2636,11 @@ export default function StudentDashboard({ currentUser }: StudentDashboardProps)
                           className="text-[9px] text-indigo-400 hover:text-indigo-300 font-extrabold flex items-center space-x-1 uppercase cursor-pointer disabled:opacity-40"
                         >
                           {isGeneratingDesc ? (
-                            <span className="scale-95 animate-pulse">Expanding from keywords...</span>
+                            <span className="scale-95 animate-pulse">Expanding via Gemini...</span>
                           ) : (
                             <>
                               <Sparkles className="h-3 w-3 text-purple-400 animate-bounce" />
-                              <span>✨ Expand from Keywords</span>
+                              <span>✨ AI Auto-Flesh from Keywords</span>
                             </>
                           )}
                         </button>

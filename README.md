@@ -1,8 +1,6 @@
 # KNIT School Administration Portal
 
-A React, Vite, and Express school administration portal with student, teacher, and administrator dashboards. It uses Firebase for authentication and Firestore data, with optional Supabase, SMTP, and Twilio integrations.
-
-The application does not require Google AI, Gemini, or an AI Studio account. Study guides, marketplace descriptions, and cover images use local fallback logic so the app can run on any Node.js hosting provider.
+A React, Vite, and Express school administration portal with student, teacher, and administrator dashboards. It uses Firebase Authentication and Firestore data, with optional Gemini, Supabase, SMTP, and Twilio integrations.
 
 ## Requirements
 
@@ -43,7 +41,10 @@ Set only the integrations you plan to use. See [.env.example](.env.example) for 
 
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE`, `SMTP_SENDER` for real email delivery
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` for SMS delivery
+- `GEMINI_API_KEY` for server-side AI descriptions, study guides, and cover images
 - `GOOGLE_APPLICATION_CREDENTIALS` or `FIREBASE_SERVICE_ACCOUNT_JSON` only when server-side Firebase Admin access is required
+
+AI endpoints require a verified Firebase session. Registration email delivery is rate-limited because it runs before the new account is authenticated. Never put `GEMINI_API_KEY`, Firebase service-account JSON, SMTP credentials, or Twilio credentials in frontend variables such as `VITE_*`.
 
 Do not commit `.env`, service-account JSON files, SMTP passwords, or Twilio tokens.
 

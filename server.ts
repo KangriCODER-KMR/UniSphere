@@ -1,10 +1,12 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
+import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import twilio from 'twilio';
 import nodemailer from 'nodemailer';
-import { initializeApp, getApps } from 'firebase-admin/app';
+import { cert, initializeApp, getApps } from 'firebase-admin/app';
+import { getAuth as getFirebaseAdminAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 
@@ -30,9 +32,10 @@ function getFirestoreAdmin() {
         const firebaseConfig = JSON.parse(configRaw);
         
         if (getApps().length === 0) {
-          initializeApp({
-            projectId: firebaseConfig.projectId
-          });
+          const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+            ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)
+            : undefined;
+          initializeApp(serviceAccount ? { credential: cert(serviceAccount) } : { projectId: firebaseConfig.projectId });
         }
         
         // Use default database, or sub-database if configured
@@ -77,6 +80,120 @@ function loadSmtpFromCache(): any {
   }
   return null;
 }
+
+async function requireApiUser(req: express.Request, res: express.Response, next: express.NextFunction, adminOnly = false) {
+  try {
+    const authorization = req.headers.authorization || '';
+    const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+    const adminDbInstance = getFirestoreAdmin();
+    if (!token || !adminDbInstance || getApps().length === 0) {
+      return res.status(503).json({ error: 'Authenticated server integration is not configured.' });
+    }
+    const decoded = await getFirebaseAdminAuth(getApps()[0]).verifyIdToken(token);
+    if (!decoded.email_verified && decoded.firebase?.sign_in_provider !== 'google.com') {
+      return res.status(403).json({ error: 'Verified account required.' });
+    }
+    const profile = await adminDbInstance.collection('users').doc(decoded.uid).get();
+    if (!profile.exists || (adminOnly && profile.data()?.role !== 'admin')) {
+      return res.status(403).json({ error: 'Insufficient permissions.' });
+    }
+    next();
+  } catch (error) {
+    console.warn('[API AUTH] Request rejected:', error);
+    return res.status(401).json({ error: 'Invalid or expired authentication token.' });
+  }
+}
+
+app.use('/api/send-email', (req, res, next) => {
+  if (!allowAiRequest(req)) return res.status(429).json({ error: 'Email request limit reached. Try again in a minute.' });
+  next();
+});
+app.use('/api/ai', (req, res, next) => requireApiUser(req, res, next));
+app.use(['/api/get-smtp', '/api/save-smtp'], (req, res, next) => requireApiUser(req, res, next, true));
+
+let aiClient: GoogleGenAI | null = null;
+const aiRequests = new Map<string, number[]>();
+
+function getGeminiClient(): GoogleGenAI {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY is not configured on this server.');
+  }
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+  return aiClient;
+}
+
+function allowAiRequest(req: express.Request): boolean {
+  const now = Date.now();
+  const key = req.ip || 'unknown';
+  const recent = (aiRequests.get(key) || []).filter(timestamp => now - timestamp < 60_000);
+  if (recent.length >= 20) return false;
+  recent.push(now);
+  aiRequests.set(key, recent);
+  return true;
+}
+
+app.use('/api/ai', (req, res, next) => {
+  if (!allowAiRequest(req)) {
+    return res.status(429).json({ error: 'AI request limit reached. Try again in a minute.' });
+  }
+  next();
+});
+
+app.post('/api/ai/generate-description', async (req, res) => {
+  const { keywords, category } = req.body;
+  if (!keywords || typeof keywords !== 'string') {
+    return res.status(400).json({ error: 'Keywords are required.' });
+  }
+  try {
+    const response = await getGeminiClient().models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Write a trustworthy 2-4 sentence campus marketplace description for a ${category || 'general item'} using these seller notes: ${keywords}. Mention condition and student usefulness without inventing specific facts.`
+    });
+    return res.json({ description: response.text?.trim() || keywords });
+  } catch (error: any) {
+    console.error('AI description error:', error);
+    return res.status(503).json({ error: error.message || 'AI service unavailable.' });
+  }
+});
+
+app.post('/api/ai/explain-book', async (req, res) => {
+  const { title, authors, description, studentYear, studentBranch } = req.body;
+  if (!title || typeof title !== 'string') {
+    return res.status(400).json({ error: 'Book title is required.' });
+  }
+  try {
+    const response = await getGeminiClient().models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `For a ${studentYear || 'university'} ${studentBranch || 'engineering'} student, explain the academic value of "${title}" by ${authors || 'unknown author'} (${description || 'no description'}). Return exactly these three markdown sections: ### 1. CURRICULUM SYLLABUS RELEVANCE, ### 2. 5-WEEK ACCELERATED STUDY ROADMAP, ### 3. EXAM CRITICAL CHEAT SHEET TAKEAWAYS. Keep it concise and do not invent course requirements.`
+    });
+    return res.json({ explanation: response.text?.trim() || 'No study guidance was generated.' });
+  } catch (error: any) {
+    console.error('AI book explanation error:', error);
+    return res.status(503).json({ error: error.message || 'AI service unavailable.' });
+  }
+});
+
+app.post('/api/ai/generate-cover', async (req, res) => {
+  const { title, details } = req.body;
+  if ((!title || typeof title !== 'string') && (!details || typeof details !== 'string')) {
+    return res.status(400).json({ error: 'Title or details are required.' });
+  }
+  try {
+    const response = await getGeminiClient().models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: { parts: [{ text: `Create a clean square academic cover image for ${title || 'a campus listing'}. Details: ${details || 'educational resource'}. Use a professional, modern, readable design.` }] },
+      config: { imageConfig: { aspectRatio: '1:1' } }
+    });
+    const part = response.candidates?.[0]?.content?.parts?.find(item => item.inlineData?.data);
+    if (!part?.inlineData?.data) throw new Error('The image model returned no image.');
+    return res.json({ imageUrl: `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}` });
+  } catch (error: any) {
+    console.error('AI cover error:', error);
+    return res.status(503).json({ error: error.message || 'AI image service unavailable.' });
+  }
+});
 
 // Secure marketplace purchase endpoint with dynamic pricing calculation & commission distribution
 app.post('/api/marketplace/create-order', async (req, res) => {

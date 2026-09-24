@@ -13,7 +13,7 @@ import {
 import { dbService } from '../lib/db';
 import { Student, Teacher, CollegeEvent, Notice, Complaint, UserProfile } from '../types';
 import ZeroTrustFirewall from './ZeroTrustFirewall';
-import { db } from '../lib/firebase';
+import { authenticatedFetch, db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 interface AdminDashboardProps {
@@ -44,12 +44,6 @@ export default function AdminDashboard({ currentUser }: AdminDashboardProps) {
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [userAccounts, setUserAccounts] = useState<any[]>([]);
 
-  // Master Administrative credentials states
-  const [adminEmail, setAdminEmail] = useState(() => dbService.getAdminCredentials().email);
-  const [adminPassword, setAdminPassword] = useState(() => dbService.getAdminCredentials().password);
-  const [adminCredMsg, setAdminCredMsg] = useState('');
-  const [adminCredErr, setAdminCredErr] = useState('');
-
   // SMTP Configuration & MFA Diagnostics Console States
   const [smtpHost, setSmtpHostState] = useState(() => localStorage.getItem('diag_smtp_host') || 'smtp.resend.com');
   const [smtpPort, setSmtpPortState] = useState(() => localStorage.getItem('diag_smtp_port') || '587');
@@ -72,7 +66,7 @@ export default function AdminDashboard({ currentUser }: AdminDashboardProps) {
   useEffect(() => {
     async function loadCloudSmtp() {
       try {
-        const response = await fetch('/api/get-smtp');
+        const response = await authenticatedFetch('/api/get-smtp');
         if (!response.ok) throw new Error('Unsuccessful API lookup');
         const data = await response.json();
         
@@ -89,8 +83,7 @@ export default function AdminDashboard({ currentUser }: AdminDashboardProps) {
           localStorage.setItem('diag_smtp_user', data.user);
         }
         if (data.hasPass) {
-          setSmtpPassState('••••••••••••');
-          localStorage.setItem('diag_smtp_pass', '••••••••••••');
+          setSmtpPassState('');
         }
         if (data.secure !== undefined) {
           setSmtpSecureState(data.secure);
@@ -513,22 +506,6 @@ TCH403,Er. Alok Ranjan,Mechanical Engineering,Ph.D,12 Years,Fluid Dynamics;Therm
     }
   };
 
-  const handleSaveAdminCredentials = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminCredErr('');
-    setAdminCredMsg('');
-    if (!adminEmail.trim() || !adminPassword.trim()) {
-      setAdminCredErr('Please enter both valid email and passcode.');
-      return;
-    }
-    try {
-      await dbService.saveAdminCredentials(adminEmail.trim(), adminPassword.trim());
-      setAdminCredMsg('Dean Master access credentials successfully modified and synchronized.');
-    } catch (err: any) {
-      setAdminCredErr(err.message || 'Failed to update credentials.');
-    }
-  };
-
   return (
     <div className="space-y-6">
       
@@ -738,7 +715,7 @@ TCH403,Er. Alok Ranjan,Mechanical Engineering,Ph.D,12 Years,Fluid Dynamics;Therm
                           </span>
                         </td>
                         <td className="p-4 font-mono text-slate-500 dark:text-slate-400 select-all font-semibold">
-                          {acc.password ? acc.password : 'Google-Linked Account'}
+                          {acc.uid ? 'Firebase Authentication account' : 'Legacy local account'}
                         </td>
                         <td className="p-4">
                           <span className={`px-2 py-1 rounded-full text-[9px] font-extrabold uppercase ${
@@ -793,62 +770,9 @@ TCH403,Er. Alok Ranjan,Mechanical Engineering,Ph.D,12 Years,Fluid Dynamics;Therm
               </p>
             </div>
 
-            <form onSubmit={handleSaveAdminCredentials} className="space-y-4 pt-2">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-450 uppercase tracking-wide">Master Dean Email</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
-                    <Users className="h-4 w-4" />
-                  </span>
-                  <input
-                    type="email"
-                    required
-                    value={adminEmail}
-                    onChange={(e) => setAdminEmail(e.target.value)}
-                    className="w-full text-xs font-semibold bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl py-2.5 pl-10 pr-4 text-slate-900 dark:text-slate-100 focus:border-indigo-500 outline-none transition-colors"
-                    placeholder="name@gmail.com"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-450 uppercase tracking-wide">Master Admin Passcode</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-550">
-                    <Key className="h-4 w-4" />
-                  </span>
-                  <input
-                    type="text"
-                    required
-                    value={adminPassword}
-                    onChange={(e) => setAdminPassword(e.target.value)}
-                    className="w-full text-xs font-mono bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl py-2.5 pl-10 pr-4 text-slate-900 dark:text-slate-100 focus:border-indigo-500 outline-none transition-colors"
-                  />
-                </div>
-              </div>
-
-              {adminCredMsg && (
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl text-[11px] font-semibold flex items-center space-x-1.5">
-                  <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>{adminCredMsg}</span>
-                </div>
-              )}
-
-              {adminCredErr && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-450 rounded-xl text-[11px] font-semibold flex items-center space-x-1.5">
-                  <AlertTriangle className="h-4 w-4 text-rose-500 shrink-0" />
-                  <span>{adminCredErr}</span>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                className="w-full bg-indigo-650 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs transition-colors cursor-pointer shadow-md flex items-center justify-center space-x-1.5"
-              >
-                <Key className="h-4 w-4" />
-                <span>Save New Gate Credentials</span>
-              </button>
-            </form>
+            <div className="p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Administrator passwords are managed by Firebase Authentication and are never stored in this portal or browser storage. Use Firebase Console password reset or account management to change them.
+            </div>
           </div>
 
         </div>
@@ -2493,7 +2417,7 @@ TCH403,Er. Alok Ranjan,Mechanical Engineering,Ph.D,12 Years,Fluid Dynamics;Therm
                         <li>Host: <span className="text-indigo-300">smtp.resend.com</span></li>
                         <li>Port: <span className="text-indigo-300">587</span> or <span className="text-indigo-300">465</span></li>
                         <li>Username: <span className="text-indigo-300">resend</span></li>
-                        <li>Password: <span className="text-pink-300">Your Resend API Key</span></li>
+                          <li>Password: <span className="text-pink-300">Configured only on the server</span></li>
                         <li>Sender: <span className="text-indigo-300">onboarding@resend.dev</span></li>
                       </ul>
                     </div>
@@ -2509,7 +2433,7 @@ TCH403,Er. Alok Ranjan,Mechanical Engineering,Ph.D,12 Years,Fluid Dynamics;Therm
                         <li>Host: <span className="text-indigo-300">smtp.gmail.com</span></li>
                         <li>Port: <span className="text-indigo-300">465</span> (SSL)</li>
                         <li>Username: <span className="text-indigo-300">Your email@gmail.com</span></li>
-                        <li>Password: <span className="text-pink-300">Google App Password</span></li>
+                          <li>Password: <span className="text-pink-300">Configured only on the server</span></li>
                         <li>Sender: <span className="text-indigo-300">Your email@gmail.com</span></li>
                       </ul>
                     </div>
@@ -2572,7 +2496,6 @@ TCH403,Er. Alok Ranjan,Mechanical Engineering,Ph.D,12 Years,Fluid Dynamics;Therm
                           value={smtpPass}
                           onChange={(e) => {
                             setSmtpPassState(e.target.value);
-                            localStorage.setItem('diag_smtp_pass', e.target.value);
                           }}
                           placeholder="re_xxxxxxxxxxxxxx or app-password"
                           className="w-full py-2 px-3 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white font-mono focus:border-indigo-500 outline-none"
@@ -2620,7 +2543,7 @@ TCH403,Er. Alok Ranjan,Mechanical Engineering,Ph.D,12 Years,Fluid Dynamics;Therm
                           setSmtpSaveSuccess(null);
                           setSmtpSaveError(null);
                           try {
-                            const apiResponse = await fetch('/api/save-smtp', {
+                            const apiResponse = await authenticatedFetch('/api/save-smtp', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({
@@ -2706,7 +2629,7 @@ TCH403,Er. Alok Ranjan,Mechanical Engineering,Ph.D,12 Years,Fluid Dynamics;Therm
                           setSmtpTestSuccess(null);
                           setSmtpTestError(null);
                           try {
-                            const res = await fetch('/api/send-email', {
+                            const res = await authenticatedFetch('/api/send-email', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({

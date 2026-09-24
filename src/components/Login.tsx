@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Landmark, GraduationCap, Users, Shield, Mail, Key, Sparkles, Brain, Award, ShieldAlert, Cpu, UserPlus, LogIn, ArrowLeft, Phone, Lock, Radio, HelpCircle, Info, ExternalLink, Settings } from 'lucide-react';
 import { UserRole } from '../types';
 import { dbService } from '../lib/db';
-import { FIREBASE_ACTIVE } from '../lib/firebase';
+import { authenticatedFetch, FIREBASE_ACTIVE } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
 
 interface LoginProps {
@@ -58,21 +58,6 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     setSuccessMsg('');
   };
 
-  const handleAutoFillForRole = (targetRole: UserRole = role) => {
-    if (targetRole === 'student') {
-      setEmail(`student@${instConfig.domain}`);
-      setPassword('student123');
-    } else if (targetRole === 'teacher') {
-      setEmail(`teacher@${instConfig.domain}`);
-      setPassword('teacher123');
-    } else if (targetRole === 'admin') {
-      setEmail(`admin@${instConfig.domain}`);
-      setPassword('admin123');
-    }
-    setError('');
-    setSuccessMsg('');
-  };
-
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError('');
@@ -116,7 +101,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
             // Trigger real Email secure dispatch via back-end server SMTP
             if (regContactType === 'email') {
               try {
-                const emailRes = await fetch('/api/send-email', {
+                const emailRes = await authenticatedFetch('/api/send-email', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -226,7 +211,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
             let realEmailSent = false;
             try {
-              const mailRes = await fetch('/api/send-email', {
+              const mailRes = await authenticatedFetch('/api/send-email', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

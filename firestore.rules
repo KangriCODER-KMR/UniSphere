@@ -11,8 +11,7 @@ service cloudfirestore {
     function isVerifiedObj() {
       return isSignedIn() && (
         request.auth.token.email_verified == true || 
-        request.auth.token.firebase.sign_in_provider == 'google.com' ||
-        request.auth.token.email != null
+        request.auth.token.firebase.sign_in_provider == 'google.com'
       );
     }
     
@@ -43,20 +42,12 @@ service cloudfirestore {
       return isVerifiedObj()
         ? (exists(/databases/$(database)/documents/users/$(request.auth.uid))
             ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
-            : (request.auth.token.email != null && exists(/databases/$(database)/documents/users/$(request.auth.token.email))
-                ? get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role
-                : 'guest'))
+            : 'guest')
         : 'guest';
     }
 
     function isAdmin() {
-      return isVerifiedObj() && (
-        getUserRole() == 'admin' ||
-        (request.auth.token.email != null && (
-          request.auth.token.email.toLowerCase() == 'anayatgull019@gmail.com' ||
-          request.auth.token.email.toLowerCase() == 'admin@knit.ac.in'
-        ))
-      );
+      return isVerifiedObj() && getUserRole() == 'admin';
     }
 
     function isTeacher() {
@@ -76,12 +67,12 @@ service cloudfirestore {
     // Attack 1: Prevent Identity Spoofing (role elevation). Users cannot assign themselves role='admin'.
     // Attack 10: Prevents Denial-of-Wallet (DOW) payload ID overflow via isValidId(userId).
     match /users/{userId} {
-      allow read: if isVerifiedUser();
+      allow read: if isAdmin() || (isVerifiedUser() && request.auth.uid == userId);
       
       // Verification rules for user creation / registration
       allow create: if isValidId(userId) && (
-        (isVerifiedUser() && (incoming().role == 'student' || incoming().role == 'teacher') && incoming().email == request.auth.token.email) ||
-        (!isSignedIn() && (incoming().role == 'student' || incoming().role == 'teacher') && incoming().approved == false)
+        (isSignedIn() && request.auth.uid == userId && (incoming().role == 'student' || incoming().role == 'teacher') && incoming().email == request.auth.token.email && incoming().approved == false) ||
+        (isAdmin() && incoming().role == 'admin')
       );
       
       allow update: if isVerifiedUser() && isValidId(userId) && (
@@ -111,7 +102,6 @@ service cloudfirestore {
       allow create: if isValidId(studentId) && (
         isAdmin() || 
         isTeacher() || 
-        !isSignedIn() || 
         (request.auth.uid == studentId && incoming().gpa == 0)
       );
       
@@ -131,7 +121,7 @@ service cloudfirestore {
     // 5. TEACHERS COLLECTION
     match /teachers/{teacherId} {
       allow read: if isVerifiedUser();
-      allow create: if isValidId(teacherId) && (isAdmin() || !isSignedIn());
+      allow create: if isValidId(teacherId) && isAdmin();
       allow update, delete: if isVerifiedUser() && isValidId(teacherId) && isAdmin();
     }
 
@@ -238,7 +228,7 @@ service cloudfirestore {
       allow update, delete: if isVerifiedUser() && isValidId(productId) && (
         isAdmin() || isTeacher() || (
           // Or the seller themselves can edit/delete their listings
-          incoming().sellerId == request.auth.uid || incoming().sellerId == request.auth.token.email
+          existing().sellerId == request.auth.uid || existing().sellerId == request.auth.token.email
         )
       );
     }
@@ -246,12 +236,11 @@ service cloudfirestore {
     // Confidential Store Products (Information Asymmetry Guardrail)
     match /products_private/{productId} {
       allow read, write: if isVerifiedUser() && isAdmin();
-      allow create: if isVerifiedUser() && isValidId(productId);
     }
 
     // Dynamic settings configuration documents (including marketplace and institution)
     match /settings/{docId} {
-      allow read: if isVerifiedUser() || (isVerifiedObj() && isAdmin());
+      allow read: if (isVerifiedUser() && (docId == 'institution' || docId == 'marketplace')) || isAdmin();
       allow write: if isVerifiedObj() && isAdmin();
     }
 
@@ -266,9 +255,5 @@ service cloudfirestore {
       allow write: if isVerifiedUser() && isValidId(orderId) && (isAdmin() || isTeacher() || isStudent());
     }
 
-    // Connection Probe Collection
-    match /test/{testId} {
-      allow read: if true;
-    }
   }
 }

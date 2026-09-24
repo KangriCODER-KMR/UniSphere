@@ -19,6 +19,9 @@ import {
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
@@ -866,6 +869,13 @@ class DatabaseController {
         if (raw) {
           try {
             this.localData[key] = JSON.parse(raw);
+            if (key === 'registeredAccounts' && Array.isArray(this.localData[key])) {
+              this.localData[key] = (this.localData[key] as any[]).map(account => {
+                const { password: _legacyPassword, ...safeAccount } = account;
+                return safeAccount;
+              }) as typeof this.localData[typeof key];
+              localStorage.setItem(`knit_${key}`, JSON.stringify(this.localData[key]));
+            }
           } catch (e) {
             console.warn(`LocalStorage failed to parse key "knit_${key}". Using static default.`);
           }
@@ -1276,6 +1286,39 @@ class DatabaseController {
   }
 
   // --- USER AUTH CONTROL (With Firebase & Google Support) ---
+  async restoreSession(): Promise<UserProfile | null> {
+    if (!FIREBASE_ACTIVE) return null;
+    const firebaseUser = await new Promise<import('firebase/auth').User | null>(resolve => {
+      const unsubscribe = onAuthStateChanged(auth, user => {
+        unsubscribe();
+        resolve(user);
+      });
+    });
+    if (!firebaseUser?.email || !firebaseUser.emailVerified) {
+      this.localData.currentUser = null;
+      this.persistLocal('currentUser');
+      return null;
+    }
+    const userSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
+    if (!userSnap.exists()) return null;
+    const data = userSnap.data();
+    if (data.role !== 'admin' && data.approved === false) return null;
+    const profile: UserProfile = {
+      id: firebaseUser.uid,
+      name: data.name,
+      email: firebaseUser.email,
+      role: data.role as UserRole,
+      branch: data.branch,
+      department: data.department,
+      year: data.year,
+      section: data.section,
+      approved: data.approved !== false
+    };
+    this.localData.currentUser = profile;
+    this.persistLocal('currentUser');
+    return profile;
+  }
+
   getCurrentUser(): UserProfile | null {
     return this.localData.currentUser;
   }
@@ -1308,17 +1351,7 @@ class DatabaseController {
       }
 
       const userDocRef = doc(db, 'users', fbUser.uid);
-      let role: UserRole = 'student';
       let name = fbUser.displayName || fbUser.email.split('@')[0];
-
-      // anayatgull019@gmail.com or admin credentials get Admin role
-      if (
-        fbUser.email.toLowerCase() === 'anayatgull019@gmail.com' || 
-        fbUser.email.toLowerCase() === 'admin@knit.ac.in' ||
-        fbUser.email.toLowerCase() === `admin@${customDomain}`
-      ) {
-        role = 'admin';
-      }
 
       const docSnap = await getDoc(userDocRef);
       let profile: UserProfile;
@@ -1335,16 +1368,7 @@ class DatabaseController {
           section: data.section || 'A'
         };
       } else {
-        profile = {
-          id: fbUser.uid,
-          name,
-          email: fbUser.email,
-          role: role,
-          branch: 'Computer Science',
-          year: 2024,
-          section: 'A'
-        };
-        await setDoc(userDocRef, profile);
+        throw new Error('Your Google account has no approved portal profile. Contact an administrator.');
       }
 
       this.localData.currentUser = profile;
@@ -1356,390 +1380,63 @@ class DatabaseController {
     } catch (error: any) {
       console.error("Google Auth Error:", error);
       
-      // IFrame Sandbox Network/Popup Fallback
-      if (
-        error?.code === 'auth/network-request-failed' || 
-        error?.message?.includes('network-request-failed') ||
-        error?.message?.includes('popup-blocked') ||
-        error?.code === 'auth/popup-closed-by-user' ||
-        error?.message?.includes('popup-closed-by-user')
-      ) {
-        console.warn("Activating Sandbox Google Sign-In Fallback for Admin testing inside preview!");
-        // Simulate google sign-in success with the user's direct admin email for testing!
-        const sandboxEmail = 'anayatgull019@gmail.com';
-        const profile: UserProfile = {
-          id: 'sandbox-google-uid-019',
-          name: 'Anayat Gull Sandbox',
-          email: sandboxEmail,
-          role: 'admin',
-          designation: 'Dean & Workspace Admin'
-        };
-        
-        // Attempt to sync/save to Firestore users collection in sandbox mode if possible
-        try {
-          const userDocRef = doc(db, 'users', 'sandbox-google-uid-019');
-          await setDoc(userDocRef, profile);
-        } catch (dbErr) {
-          console.warn("Could not save sandbox user to active Firestore:", dbErr);
-        }
-
-        this.localData.currentUser = profile;
-        this.persistLocal('currentUser');
-        this.addLog('Authentication', `Logged in via Google Auth Sandbox Fallback as ${profile.role} (${profile.email}) due to iframe/network constraints.`);
-        
-        try {
-          await this.syncFromFirestore();
-        } catch (syncErr) {
-          console.warn("Could not sync Firestore collections:", syncErr);
-        }
-        
-        return profile;
-      }
-      
       throw error;
     }
   }
 
-  getAdminCredentials() {
-    const saved = localStorage.getItem('school_admin_master_credentials');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {}
-    }
-    return {
-      email: 'anayatgull019@gmail.com',
-      password: 'admin123'
-    };
-  }
-
-  async saveAdminCredentials(email: string, password?: string): Promise<void> {
-    const lowercaseEmail = email.toLowerCase();
-    const finalPassword = password || 'admin123';
-    localStorage.setItem('school_admin_master_credentials', JSON.stringify({ email: lowercaseEmail, password: finalPassword }));
-    
-    // Also save in local registeredAccounts roster so it works with local authentication
-    if (!this.localData.registeredAccounts) {
-      this.localData.registeredAccounts = [];
-    }
-    this.localData.registeredAccounts = this.localData.registeredAccounts.filter(acc => acc.role !== 'admin');
-    this.localData.registeredAccounts.push({
-      email: lowercaseEmail,
-      password: finalPassword,
-      role: 'admin',
-      profile: {
-        id: 'ADM019',
-        name: 'Anayat Gull (Admin)',
-        email: lowercaseEmail,
-        role: 'admin',
-        approved: true,
-        designation: 'Dean of Information Systems'
-      }
-    });
-    this.persistLocal('registeredAccounts');
-
-    // Also write to Firestore users collection
-    if (FIREBASE_ACTIVE) {
-      try {
-        await this.writeDoc('users', lowercaseEmail, {
-          id: 'ADM019',
-          name: 'Anayat Gull (Admin)',
-          email: lowercaseEmail,
-          password: finalPassword,
-          role: 'admin',
-          approved: true,
-          designation: 'Dean of Information Systems'
-        });
-      } catch (err) {
-        console.warn("Could not write custom Admin credentials to Firestore:", err);
-      }
-    }
-    this.addLog('Authentication', `Dean updated administrative credentials to ${lowercaseEmail}`);
-  }
-
   async login(email: string, password?: string, role?: UserRole): Promise<UserProfile> {
-    // 1. Core live Firebase custom credentials authentication
-    if (FIREBASE_ACTIVE) {
-      try {
-        const lowercaseEmail = email.toLowerCase();
-        const userDocRef = doc(db, 'users', lowercaseEmail);
-        const docSnap = await getDoc(userDocRef);
-        if (docSnap.exists()) {
-          const uData = docSnap.data();
-          if (uData.password && uData.password === password) {
-            if (role && uData.role !== role) {
-              throw new Error('Specific role mismatch. Please select the correct tab above.');
-            }
-            const isApproved = uData.approved !== undefined ? uData.approved : true;
-            if (!isApproved && uData.role !== 'admin') {
-              throw new Error('Specific account activation is pending! Access is unauthorized until the Administrator (Dean) manually approves your registered credentials.');
-            }
-
-            const mappedUser: UserProfile = {
-              id: uData.id || lowercaseEmail,
-              name: uData.name,
-              email: uData.email,
-              role: uData.role as UserRole,
-              branch: uData.branch,
-              department: uData.department,
-              year: uData.year,
-              section: uData.section,
-              approved: isApproved
-            };
-            this.localData.currentUser = mappedUser;
-            this.persistLocal('currentUser');
-            this.addLog('Authentication', `Logged in via Firestore credentials as ${uData.role} (${lowercaseEmail})`);
-            
-            // Sync all user rosters, payments, and notices dynamically
-            await this.syncFromFirestore();
-            return mappedUser;
-          } else if (uData.password && uData.password !== password) {
-            throw new Error('Incorrect passcode for this registered account.');
-          }
-        }
-      } catch (err: any) {
-        console.warn('Firestore user lookup warning:', err);
-        if (err.message && (err.message.includes('mismatch') || err.message.includes('passcode') || err.message.includes('correct tab'))) {
-          throw err;
-        }
-      }
-    }
-
-    // 2. Mock Supabase fallback
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('username', email)
-        .eq('password', password || '')
-        .eq('role', role || 'student')
-        .maybeSingle();
-
-      if (data) {
-        const mappedUser: UserProfile = {
-          id: data.username,
-          name: data.username.split('@')[0].toUpperCase(),
-          email: data.username,
-          role: data.role as UserRole,
-          branch: data.role === 'student' ? 'Computer Science' : undefined,
-          year: data.role === 'student' ? 2024 : undefined,
-          section: data.role === 'student' ? 'A' : undefined
-        };
-        this.localData.currentUser = mappedUser;
-        this.persistLocal('currentUser');
-        this.addLog('Authentication', `Logged in via Supabase as ${role} (${email})`);
-        return mappedUser;
-      }
-    } catch (err) {
-      console.warn('Supabase authentication threw an error, falling back to local credentials matching.', err);
-    }
-
-    // 3. Local storage custom registered credentials
-    const foundLocalAcc = this.localData.registeredAccounts?.find(
-      acc => acc.email.toLowerCase() === email.toLowerCase() && 
-             acc.password === password && 
-             acc.role === role
-    );
-    if (foundLocalAcc) {
-      const isApproved = foundLocalAcc.profile?.approved !== undefined ? foundLocalAcc.profile.approved : true;
-      if (!isApproved && foundLocalAcc.role !== 'admin') {
-        throw new Error('Specific account activation is pending! Access is unauthorized until the Administrator (Dean) manually approves your registered credentials.');
-      }
-      this.localData.currentUser = foundLocalAcc.profile;
-      this.persistLocal('currentUser');
-      this.addLog('Authentication', `Logged in via registered ledger as ${role} (${email})`);
-      return foundLocalAcc.profile;
-    }
-
-    // 4. Fallback default developer/test accounts
-    let localProfile: UserProfile | undefined = undefined;
-    const instConfig = this.getInstitutionalConfig();
-    const domain = (instConfig?.domain || 'knit.ac.in').toLowerCase();
-
-    const isStudentEmail = email.toLowerCase() === 'student@knit.ac.in' || email.toLowerCase() === `student@${domain}`;
-    const isTeacherEmail = email.toLowerCase() === 'teacher@knit.ac.in' || email.toLowerCase() === `teacher@${domain}`;
-    const isAdminEmail = email.toLowerCase() === 'admin@knit.ac.in' || email.toLowerCase() === `admin@${domain}`;
-
-    const adminCreds = this.getAdminCredentials();
-    const isCustomAdmin = email.toLowerCase() === adminCreds.email.toLowerCase() && password === adminCreds.password;
-
-    if (isStudentEmail && password === 'student123') {
-      localProfile = {
-        id: 'CS2024001',
-        name: 'Aarav Sharma',
-        email: email.toLowerCase(),
-        role: 'student',
-        branch: 'Computer Science',
-        year: 2024,
-        section: 'A'
-      };
-    } else if (isTeacherEmail && password === 'teacher123') {
-      localProfile = {
-        id: 'TCH001',
-        name: 'Prof. Priya Singh',
-        email: email.toLowerCase(),
-        role: 'teacher',
-        department: 'Computer Science'
-      };
-    } else if (isCustomAdmin) {
-      localProfile = {
-        id: 'ADM019',
-        name: 'Anayat Gull (Admin)',
-        email: adminCreds.email.toLowerCase(),
-        role: 'admin',
-        designation: 'Dean of Information Systems'
-      };
-    } else if (email.toLowerCase() === 'anayatgull019@gmail.com' && password === 'admin123') {
-      localProfile = {
-        id: 'ADM019',
-        name: 'Anayat Gull (Admin)',
-        email: 'anayatgull019@gmail.com',
-        role: 'admin',
-        designation: 'Dean of Information Systems'
-      };
-    } else if (isAdminEmail && password === 'admin123') {
-      localProfile = {
-        id: 'ADM001',
-        name: 'Dr. Suresh Kumar',
-        email: email.toLowerCase(),
-        role: 'admin',
-        designation: 'Dean Academic Affairs'
-      };
-    }
-
-    if (localProfile) {
-      if (role && localProfile.role !== role) {
-        throw new Error('Specific role mismatch. Please select the correct tab above.');
-      }
-      this.localData.currentUser = localProfile;
-      this.persistLocal('currentUser');
-      this.addLog('Authentication', `Logged in via Sandbox Fallback as ${localProfile.role} (${email})`);
-      return localProfile;
-    }
-
-    throw new Error('Invalid email or password.');
+    return this.validateCredentials(email, password, role);
   }
 
   async validateCredentials(email: string, password?: string, role?: UserRole): Promise<UserProfile> {
-    if (FIREBASE_ACTIVE) {
-      try {
-        const lowercaseEmail = email.toLowerCase();
-        const userDocRef = doc(db, 'users', lowercaseEmail);
-        const docSnap = await getDoc(userDocRef);
-        if (docSnap.exists()) {
-          const uData = docSnap.data();
-          if (uData.password && uData.password === password) {
-            if (role && uData.role !== role) {
-              throw new Error('Specific role mismatch. Please select the correct tab above.');
-            }
-            return {
-              id: uData.id || lowercaseEmail,
-              name: uData.name,
-              email: uData.email,
-              role: uData.role as UserRole,
-              branch: uData.branch,
-              department: uData.department,
-              year: uData.year,
-              section: uData.section,
-              approved: uData.approved !== undefined ? uData.approved : true
-            };
-          } else if (uData.password && uData.password !== password) {
-            throw new Error('Incorrect passcode for this registered account.');
-          }
-        }
-      } catch (err: any) {
-        console.warn('Firestore user lookup warning in check:', err);
-        if (err.message && (err.message.includes('mismatch') || err.message.includes('passcode') || err.message.includes('correct tab'))) {
-          throw err;
-        }
-      }
+    if (!FIREBASE_ACTIVE) {
+      throw new Error('Firebase Authentication is not configured. Set up Firebase before signing in.');
     }
 
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('username', email)
-        .eq('password', password || '')
-        .eq('role', role || 'student')
-        .maybeSingle();
-
-      if (data) {
-        return {
-          id: data.username,
-          name: data.username.split('@')[0].toUpperCase(),
-          email: data.username,
-          role: data.role as UserRole,
-          branch: data.role === 'student' ? 'Computer Science' : undefined,
-          year: data.role === 'student' ? 2024 : undefined,
-          section: data.role === 'student' ? 'A' : undefined
-        };
+      const credential = await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password || '');
+      if (!credential.user.emailVerified) {
+        await signOut(auth);
+        throw new Error('Please verify your email address before signing in.');
       }
-    } catch (err) {
-      console.warn('Supabase authentication error in validate:', err);
-    }
 
-    const foundLocalAcc = this.localData.registeredAccounts?.find(
-      acc => acc.email.toLowerCase() === email.toLowerCase() && 
-             acc.password === password && 
-             acc.role === role
-    );
-    if (foundLocalAcc) {
-      return foundLocalAcc.profile;
-    }
+      const userSnap = await getDoc(doc(db, 'users', credential.user.uid));
+      if (!userSnap.exists()) {
+        await signOut(auth);
+        throw new Error('Your account profile is not configured. Contact an administrator.');
+      }
 
-    let localProfile: UserProfile | undefined = undefined;
-    const instConfig2 = this.getInstitutionalConfig();
-    const domain2 = (instConfig2?.domain || 'knit.ac.in').toLowerCase();
-
-    const isStudentEmail2 = email.toLowerCase() === 'student@knit.ac.in' || email.toLowerCase() === `student@${domain2}`;
-    const isTeacherEmail2 = email.toLowerCase() === 'teacher@knit.ac.in' || email.toLowerCase() === `teacher@${domain2}`;
-    const isAdminEmail2 = email.toLowerCase() === 'admin@knit.ac.in' || email.toLowerCase() === `admin@${domain2}`;
-
-    if (isStudentEmail2 && password === 'student123') {
-      localProfile = {
-        id: 'CS2024001',
-        name: 'Aarav Sharma',
-        email: email.toLowerCase(),
-        role: 'student',
-        branch: 'Computer Science',
-        year: 2024,
-        section: 'A'
-      };
-    } else if (isTeacherEmail2 && password === 'teacher123') {
-      localProfile = {
-        id: 'TCH001',
-        name: 'Prof. Priya Singh',
-        email: email.toLowerCase(),
-        role: 'teacher',
-        department: 'Computer Science'
-      };
-    } else if (email.toLowerCase() === 'anayatgull019@gmail.com' && password === 'admin123') {
-      localProfile = {
-        id: 'ADM019',
-        name: 'Anayat Gull (Admin)',
-        email: 'anayatgull019@gmail.com',
-        role: 'admin',
-        designation: 'Dean of Information Systems'
-      };
-    } else if (isAdminEmail2 && password === 'admin123') {
-      localProfile = {
-        id: 'ADM001',
-        name: 'Dr. Suresh Kumar',
-        email: email.toLowerCase(),
-        role: 'admin',
-        designation: 'Dean Academic Affairs'
-      };
-    }
-
-    if (localProfile) {
-      if (role && localProfile.role !== role) {
+      const data = userSnap.data();
+      if (role && data.role !== role) {
+        await signOut(auth);
         throw new Error('Specific role mismatch. Please select the correct tab above.');
       }
-      return localProfile;
-    }
+      if (data.role !== 'admin' && data.approved === false) {
+        await signOut(auth);
+        throw new Error('Your account is pending administrator approval.');
+      }
 
-    throw new Error('Invalid email or password.');
+      const profile: UserProfile = {
+        id: credential.user.uid,
+        name: data.name,
+        email: credential.user.email,
+        role: data.role as UserRole,
+        branch: data.branch,
+        department: data.department,
+        year: data.year,
+        section: data.section,
+        approved: data.approved !== false
+      };
+      this.localData.currentUser = profile;
+      this.persistLocal('currentUser');
+      await this.syncFromFirestore();
+      return profile;
+    } catch (err: any) {
+      if (err?.message?.includes('Please verify') || err?.message?.includes('not configured') || err?.message?.includes('mismatch') || err?.message?.includes('pending')) {
+        throw err;
+      }
+      throw new Error('Invalid email or password.');
+    }
   }
 
   async finalizeLogin(profile: UserProfile, phone: string) {
@@ -1780,28 +1477,6 @@ class DatabaseController {
       throw new Error("Forbidden: Admin privileges cannot be acquired via public self-registration. Administrative credentials are authenticated through strict institution whitelist overrides.");
     }
 
-    // Check if account already exists locally
-    const duplicate = this.localData.registeredAccounts?.find(acc => acc.email.toLowerCase() === lowercaseEmail);
-    if (duplicate) {
-      throw new Error("An account is already registered with this email.");
-    }
-
-    // Check if account already exists in the cloud database
-    if (FIREBASE_ACTIVE) {
-      try {
-        const userDocRef = doc(db, 'users', lowercaseEmail);
-        const docSnap = await getDoc(userDocRef);
-        if (docSnap.exists()) {
-          throw new Error("An account is already registered with this email in the cloud database.");
-        }
-      } catch (err: any) {
-        if (err.message && err.message.includes("already registered")) {
-          throw err;
-        }
-        console.warn("Skipping cloud duplicate checks:", err);
-      }
-    }
-
     // Construct UserProfile - Default to false approval
     const profile: UserProfile = {
       id: data.rollNo,
@@ -1816,15 +1491,21 @@ class DatabaseController {
       phone: data.phone || ''
     };
 
-    // Save profile and passcode securely inside Firestore users collection
+    if (!FIREBASE_ACTIVE || !data.password) {
+      throw new Error('Firebase Authentication and a passcode are required to create an account.');
+    }
+
+    const credential = await createUserWithEmailAndPassword(auth, lowercaseEmail, data.password);
+    await sendEmailVerification(credential.user);
+
+    // Store profile metadata only. Firebase Authentication owns the password.
     if (FIREBASE_ACTIVE) {
       try {
-        const userDocRef = doc(db, 'users', lowercaseEmail);
-        const userCredentials = {
+        const userDocRef = doc(db, 'users', credential.user.uid);
+        const userProfile = {
           id: data.rollNo,
           name: data.name,
           email: lowercaseEmail,
-          password: data.password || '',
           role: data.role,
           branch: data.role === 'student' ? data.branchOrDept : undefined,
           department: data.role === 'teacher' ? data.branchOrDept : undefined,
@@ -1833,23 +1514,12 @@ class DatabaseController {
           approved: false, // Default to pending approval
           phone: data.phone || ''
         };
-        await setDoc(userDocRef, userCredentials);
+        await setDoc(userDocRef, userProfile);
       } catch (err) {
-        console.warn("Could not save custom user account securely to Firestore collections:", err);
+        await credential.user.delete();
+        throw new Error('Could not create the account profile. Please try again.');
       }
     }
-
-    // Add to registered accounts
-    if (!this.localData.registeredAccounts) {
-      this.localData.registeredAccounts = [];
-    }
-    this.localData.registeredAccounts.push({
-      email: data.email,
-      password: data.password,
-      role: data.role,
-      profile
-    });
-    this.persistLocal('registeredAccounts');
 
     // Also register on actual database list rosters so they appear on administrative control catalogs
     if (data.role === 'student') {
@@ -1896,6 +1566,7 @@ class DatabaseController {
     }
 
     this.addLog('Authentication', `Successfully registered new ${data.role} account portfolio for ${data.name} (${data.email})`);
+    await signOut(auth);
     return profile;
   }
 
@@ -1966,7 +1637,6 @@ class DatabaseController {
         email: acc.email,
         name: acc.profile?.name || '',
         role: acc.role,
-        password: acc.password,
         id: acc.profile?.id || 'N/A',
         branch: acc.profile?.branch || acc.profile?.department || 'N/A',
         approved: acc.profile?.approved !== undefined ? acc.profile.approved : true,
@@ -1979,7 +1649,8 @@ class DatabaseController {
         return snap.docs.map(doc => {
           const d = doc.data();
           return {
-            email: doc.id,
+            email: d.email || '',
+            uid: doc.id,
             ...d,
             approved: d.approved !== undefined ? d.approved : true,
             phone: d.phone || ''
@@ -1993,7 +1664,6 @@ class DatabaseController {
       email: acc.email,
       name: acc.profile?.name || '',
       role: acc.role,
-      password: acc.password,
       id: acc.profile?.id || 'N/A',
       branch: acc.profile?.branch || acc.profile?.department || 'N/A',
       approved: acc.profile?.approved !== undefined ? acc.profile.approved : true,

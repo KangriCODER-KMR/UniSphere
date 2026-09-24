@@ -25,6 +25,13 @@ export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
 
 export const FIREBASE_ACTIVE = isConfigured;
+export async function authenticatedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+  const headers = new Headers(init.headers);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  return fetch(input, { ...init, headers });
+}
 
 // Operation Types defined by the Firebase integration skill specifications
 export enum OperationType {

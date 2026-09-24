@@ -14,13 +14,19 @@ export default function App() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-    // Check if an authorization session already exists on page reload
-    const storedUser = dbService.getCurrentUser();
-    if (storedUser) {
-      setCurrentUser(storedUser);
-      dbService.checkConnectionAndSync().catch(console.error);
-    }
-    setCheckingAuth(false);
+    let active = true;
+    dbService.restoreSession().then(user => {
+      if (!active) return;
+      if (user) {
+        setCurrentUser(user);
+        dbService.checkConnectionAndSync().catch(console.error);
+      }
+      setCheckingAuth(false);
+    }).catch(error => {
+      console.error('Session restore failed:', error);
+      if (active) setCheckingAuth(false);
+    });
+    return () => { active = false; };
   }, []);
 
   const handleLoginSuccess = () => {
